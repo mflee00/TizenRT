@@ -151,7 +151,10 @@ static int rtl8730e_adam110_irq_attach(adam110_handler_t handler, FAR char *arg)
 {
 	g_adam110info.handler = handler;
 	gpio_irq_init(&g_adam110info.data_ready, PA_23, rtl8730e_adam110_irq_handler, (uint32_t)arg);
-	gpio_irq_set(&g_adam110info.data_ready, IRQ_FALL, 1);
+	gpio_irq_set(&g_adam110info.data_ready, IRQ_HIGH, 1);
+	/* gpio_irq_set forces debounce ON (requires 2x32kHz cycles ≈ 62μs).
+	 * Override to disable debounce so short pulses (< 62μs) are detected. */
+	GPIO_INTMode(PA_23, ENABLE, GPIO_INT_Trigger_LEVEL, GPIO_INT_POLARITY_ACTIVE_HIGH, GPIO_INT_DEBOUNCE_DISABLE);
 	gpio_irq_enable(&g_adam110info.data_ready);
 	return OK;
 }
