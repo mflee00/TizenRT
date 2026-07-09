@@ -1412,7 +1412,6 @@ static int adam110_start(FAR struct audio_lowerhalf_s *dev)
 	priv->recording = true;
 
 	ADAM110_SET_INTR(priv, AI_INTR_TYPE_AUDIO, true, &rxpkt);
-
 	adam110_givesem(&priv->devsem);
 	return 0;
 }

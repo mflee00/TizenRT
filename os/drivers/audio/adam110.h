@@ -210,8 +210,23 @@ typedef enum {
 	AI_MODEL_HIBIXBY	= 1,	/* Hi-Bixby */
 	AI_MODEL_BIXBY,				/* Bixby */
 	AI_MODEL_ALEAX,				/* Alexa */
+	AI_MODEL_FRIDGE,    		/* Fridge */ 
+	AI_MODEL_5,
+	AI_MODEL_6,
+	AI_MODEL_7,
 	AI_MODEL_MAX
 } ai_model_t;
+
+typedef enum {
+	WWD_HIBIXBY	= 0,		/* Hi-Bixby */
+	WWD_BIXBY,				/* Bixby */
+	WWD_ALEAX,				/* Alexa */
+	WWD_FRIDGE,    			/* Fridge */ 
+	WWD_MODEL_5,
+	WWD_MODEL_6,
+	WWD_MODEL_7,
+	WWD_MODEL_MAX
+} ai_wwd_detec_t;
 
 /* AI Data */
 typedef enum {
