@@ -482,12 +482,22 @@ static int adam110_send_model(FAR struct adam110_dev_s *dev)
 	}
 	close(fd);
 
-	up_udelay(10*1000);
+	/* A 100 ms delay is required for audio buffer initialization. */
+	up_udelay(100*1000);
 
 	ret = ADAM110_AI_UPDATE_RSLT(dev, &rxpkt);
 	if (ret != OK) {
 		auddbg("[E] Model update result failed.\n");
 		return ret;
+	}
+
+	/* Reconfigure the debug mode using the previous settings after an ADAM110 reset. */
+	if(dev->dsp_flow != 0) {
+		ret = ADAM110_SET_MIC_DEBUG(dev, (uint8_t)dev->dsp_flow, &rxpkt);
+		if (ret != OK) {
+			auddbg("Disable debug mode failed\n");
+			return ret;
+		}
 	}
 
 	ret = ADAM110_SET_MIC_GAIN(dev, dev->mic_gain, &rxpkt);
@@ -841,8 +851,7 @@ static int adam110_process_event(FAR struct adam110_dev_s *priv)
 	audvdbg("parm2 = 0x%x\n", rxpkt.parm2);
 
 	/* TODO if it is invalid event, should we return OK here? */
-
-	if (rxpkt.parm1 & (1 << WWD_HIBIXBY)  || rxpkt.parm1 & (1 << WWD_BIXBY) || rxpkt.parm1 & (1 << WWD_FRIDGE)) {
+	if (rxpkt.parm1 & ((1U << WWD_MODEL_MAX) - 1U)) {
 		if (!priv->kd_enabled || priv->recording) {
 			auddbg("It's not possible to handle kd kd_enabled : %d recording : %d\n", priv->kd_enabled, priv->recording);
 			goto out_unlock;
@@ -1302,7 +1311,13 @@ static int adam110_configure(FAR struct audio_lowerhalf_s *dev, FAR const struct
 			 * ADAM110 (Low/Mid/High)
 			 */
 			adam110_takesem(&priv->devsem);
-			ADAM110_AI_SET_THD(priv, priv->kd_num, (sensitivity >> 8) & 0xff, sensitivity & 0xff, &rxpkt);
+
+			/* 1:Hi bixby,2:Bixby,3:Alexa,4:Fridge */
+			if(priv->kd_num >= AI_MODEL_FRIDGE){
+				sensitivity = (uint16_t)(((uint32_t)sensitivity * 32768) / 1000);				
+			}			
+			ADAM110_AI_SET_THD(priv, priv->kd_num + 1, (sensitivity >> 8) & 0xff, sensitivity & 0xff, &rxpkt);
+
 			priv->sensitivity = sensitivity;
 			adam110_givesem(&priv->devsem);
 		}
@@ -1703,31 +1718,27 @@ static int adam110_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd, unsigned lo
 	}
 	break;
 	case AUDIOIOC_CHANGEKD: {
-		uint8_t kd_num;
-		if (((arg & AUDIO_NN_MODEL_MASK) > AUDIO_NN_MODEL_MAX) ||
-				((arg & AUDIO_NN_MODEL_LANG_MASK) > AUDIO_NN_MODEL_LANG_MAX)) {
+		uint8_t kd_num = (uint8_t)(arg & WWD_MODEL_MAX);
+
+		/* Valid WWD model range: 0 ~ WWD_MODEL_MAX - 1 */
+		if (kd_num >= WWD_MODEL_MAX) {
 			return -EINVAL;
 		}
 
-		if (arg > 2) {
-			return -EINVAL;
-		}
-
-		kd_num = (uint8_t)arg;
+		/*
+		* AUDIO_NN_MODEL_HI_BIXBY : 0 -> AI_MODEL_HIBIXBY : 1
+		* AUDIO_NN_MODEL_BIXBY    : 1 -> AI_MODEL_BIXBY   : 2
+		*/
+		kd_num += 1;
 		audvdbg("kd_num : %d priv->kd_num : %d\n", kd_num, priv->kd_num);
-
-		if (kd_num == AUDIO_NN_MODEL_HI_BIXBY) {
-			kd_num = AI_MODEL_HIBIXBY;
-		} else if (kd_num == AUDIO_NN_MODEL_BIXBY) {
-			kd_num = AI_MODEL_BIXBY;
-		}else {
-			return -EINVAL;
-		}
+		
 		adam110_takesem(&priv->devsem);
+				
 		if (priv->running) {
 			ret = -EBUSY;
     		goto out_unlock;
 		}
+
 		if (kd_num == priv->kd_num) {
 			audvdbg("already loaded, ignore change kd. kd_num : %d\n", priv->kd_num);
 			ret = OK;
@@ -1750,8 +1761,8 @@ static int adam110_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd, unsigned lo
 			goto out_unlock;
 		}
 
-		/* Firmware loaded, then disable interrupt of currently loaded model first */
-		if (priv->kd_num == AI_MODEL_HIBIXBY || priv->kd_num == AI_MODEL_BIXBY) {
+		/* Disable the interrupt for the currently selected AI model. */
+		if ((priv->kd_num >= AI_MODEL_HIBIXBY) && (priv->kd_num < AI_MODEL_MAX)) {
 			ret = ADAM110_AI_SET_INTR(priv, (priv->kd_num), false, &rxpkt);
 			if (ret != OK) {
 				auddbg("Disable old KD failed. kd_num : %d ret : %d\n", priv->kd_num, ret);
@@ -1765,8 +1776,10 @@ static int adam110_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd, unsigned lo
 		ret = ADAM110_AI_SET_INTR(priv, (priv->kd_num), true, &rxpkt);
 		if (ret != OK) {
 			auddbg("Enable new KD failed. kd_num : %d\n", priv->kd_num);
+			goto out_unlock;
 		}
 
+		/* Enable the refrigerator model interrupt. */
 		ret = ADAM110_AI_SET_INTR(priv, AI_MODEL_FRIDGE, true, &rxpkt);
 		if (ret != OK) {
 			auddbg("Enable new KD failed. kd_num : %d\n", priv->kd_num);
